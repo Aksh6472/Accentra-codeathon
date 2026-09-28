@@ -68,6 +68,7 @@ class SecurityIntegrationTest extends IntegrationTestSupport {
         getAs(employee, "/api/analytics").andExpect(status().isForbidden());
         getAs(employee, "/api/teams").andExpect(status().isForbidden());
         getAs(employee, "/api/settings").andExpect(status().isForbidden());
+        getAs(employee, "/api/hr/employees").andExpect(status().isForbidden());
         putAs(employee, "/api/policies/{id}", Map.of("name", "Hack", "annualEntitlement", 99), 1)
                 .andExpect(status().isForbidden());
         postAs(employee, "/api/holidays", Map.of("name", "Free day", "date", "2026-12-01"))
@@ -93,6 +94,7 @@ class SecurityIntegrationTest extends IntegrationTestSupport {
 
         getAs(manager, "/api/hr/leaves/pending").andExpect(status().isForbidden());
         getAs(manager, "/api/analytics").andExpect(status().isForbidden());
+        getAs(manager, "/api/hr/employees").andExpect(status().isForbidden());
         postAs(manager, "/api/hr/leaves/{id}/approve", null, teamLeave).andExpect(status().isForbidden());
         postAs(manager, "/api/leaves", Map.of("leaveTypeId", 1, "startDate", "2026-12-01", "endDate", "2026-12-01",
                 "reason", "x")).andExpect(status().isForbidden());
@@ -118,6 +120,13 @@ class SecurityIntegrationTest extends IntegrationTestSupport {
         getAs(hr, "/api/analytics").andExpect(status().isOk()).andExpect(jsonPath("$.totalRequests").isNumber());
         getAs(hr, "/api/settings").andExpect(status().isOk());
         getAs(hr, "/api/teams").andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+        JsonNode directory = read(getAs(hr, "/api/hr/employees"));
+        assertThat(directory.size()).isGreaterThan(0);
+        assertThat(directory.get(0).get("balances").size()).isGreaterThan(0);
+        getAs(hr, "/api/hr/employees/{id}/balances", directory.get(0).get("profile").get("employeeId").asLong())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eligibleMonths").isNumber())
+                .andExpect(jsonPath("$.balances[0].balance.allocated").exists());
 
         getAs(hr, "/api/manager/leaves/pending").andExpect(status().isForbidden());
         getAs(hr, "/api/leaves/my").andExpect(status().isForbidden());

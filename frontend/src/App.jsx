@@ -12,6 +12,7 @@ import ApplyLeavePage from './pages/employee/ApplyLeavePage';
 import MyLeavesPage from './pages/employee/MyLeavesPage';
 import ManagerDashboard from './pages/manager/ManagerDashboard';
 import ManagerApprovalsPage from './pages/manager/ManagerApprovalsPage';
+import TeamMembersPage from './pages/manager/TeamMembersPage';
 import HrDashboard from './pages/hr/HrDashboard';
 import HrApprovalsPage from './pages/hr/HrApprovalsPage';
 import EscalationsPage from './pages/hr/EscalationsPage';
@@ -20,6 +21,8 @@ import PoliciesPage from './pages/hr/PoliciesPage';
 import HolidaysPage from './pages/hr/HolidaysPage';
 import AnalyticsPage from './pages/hr/AnalyticsPage';
 import AuditLogPage from './pages/hr/AuditLogPage';
+import EmployeesPage from './pages/hr/EmployeesPage';
+import EmployeeDetailPage from './pages/hr/EmployeeDetailPage';
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -41,6 +44,7 @@ export default function App() {
 
         <Route path="manager" element={guard(['MANAGER'], <ManagerDashboard />)} />
         <Route path="manager/approvals" element={guard(['MANAGER'], <ManagerApprovalsPage />)} />
+        <Route path="manager/team" element={guard(['MANAGER'], <TeamMembersPage />)} />
 
         <Route path="hr" element={guard(['HR'], <HrDashboard />)} />
         <Route path="hr/approvals" element={guard(['HR'], <HrApprovalsPage />)} />
@@ -50,6 +54,8 @@ export default function App() {
         <Route path="hr/holidays" element={guard(['HR'], <HolidaysPage />)} />
         <Route path="hr/analytics" element={guard(['HR'], <AnalyticsPage />)} />
         <Route path="hr/audit" element={guard(['HR'], <AuditLogPage />)} />
+        <Route path="hr/employees" element={guard(['HR'], <EmployeesPage />)} />
+        <Route path="hr/employees/:id" element={guard(['HR'], <EmployeeDetailPage />)} />
 
         <Route path="team-calendar" element={guard(['MANAGER', 'HR'], <TeamCalendarPage />)} />
         <Route path="leaves/:id" element={<LeaveDetailPage />} />

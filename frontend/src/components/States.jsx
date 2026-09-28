@@ -12,7 +12,7 @@ export function Loading({ label = 'Loading…' }) {
 export function EmptyState({ icon = 'inbox', title, children }) {
   return (
     <div className="state">
-      <Icon name={icon} size={32} />
+      <span className="state-icon"><Icon name={icon} size={20} /></span>
       <h3>{title}</h3>
       {children && <p>{children}</p>}
     </div>
@@ -22,7 +22,7 @@ export function EmptyState({ icon = 'inbox', title, children }) {
 export function ErrorState({ message, onRetry }) {
   return (
     <div className="state" role="alert">
-      <Icon name="alert" size={32} />
+      <span className="state-icon"><Icon name="alert" size={20} /></span>
       <h3>Could not load this data</h3>
       <p>{message}</p>
       {onRetry && (

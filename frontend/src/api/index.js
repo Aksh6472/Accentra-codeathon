@@ -32,6 +32,8 @@ export const api = {
   hrEscalated: () => data(client.get('/hr/leaves/escalated')),
   hrLeaves: (params) => data(client.get('/hr/leaves', { params })),
   audit: (params) => data(client.get('/hr/audit', { params })),
+  hrEmployees: (year) => data(client.get('/hr/employees', { params: { year } })),
+  hrEmployeeBalances: (id, year) => data(client.get(`/hr/employees/${id}/balances`, { params: { year } })),
 
   teams: () => data(client.get('/teams')),
   teamCalendar: (id, from, to) => data(client.get(`/teams/${id}/calendar`, { params: { from, to } })),

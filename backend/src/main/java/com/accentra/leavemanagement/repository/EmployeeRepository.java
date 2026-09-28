@@ -23,6 +23,12 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     @Query("select e from Employee e where e.id = :id")
     Optional<Employee> findByIdForUpdate(@Param("id") Long id);
 
+    @Query("select e from Employee e join fetch e.user left join fetch e.team left join fetch e.manager order by e.fullName")
+    List<Employee> findAllForDirectory();
+
+    @Query("select e from Employee e join fetch e.user left join fetch e.team left join fetch e.manager where e.id = :id")
+    Optional<Employee> findByIdForDirectory(@Param("id") Long id);
+
     long countByTeamId(Long teamId);
 
     List<Employee> findByManagerIdOrderByFullName(Long managerId);

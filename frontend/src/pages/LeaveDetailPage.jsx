@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, performLeaveAction } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import ApprovalStepper from '../components/ApprovalStepper';
 import { BalanceCard } from '../components/BalanceCards';
 import ConflictPanel from '../components/ConflictPanel';
 import HistoryTimeline from '../components/HistoryTimeline';
@@ -11,26 +12,26 @@ import { ConfirmDialog } from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 import { Alert, AsyncBoundary } from '../components/States';
 import useAsync from '../hooks/useAsync';
-import { formatDate, formatDateTime, num, plural } from '../lib/format';
+import { formatDateTime, formatRange, initials, num, plural, requestCode } from '../lib/format';
 
 const ACTIONS = {
   MANAGER_APPROVE: {
-    label: 'Approve', tone: 'good', icon: 'check', title: 'Approve leave request',
+    label: 'Approve Request', tone: 'good', icon: 'check', title: 'Approve leave request',
     message: 'The request moves to HR for final approval.', commentLabel: 'Comment for the employee',
     success: 'Approved. The request is now with HR.',
   },
   MANAGER_REJECT: {
-    label: 'Reject', tone: 'danger', icon: 'x', title: 'Reject leave request',
+    label: 'Reject Request', tone: 'danger', icon: 'x', title: 'Reject leave request',
     message: 'The employee will be notified and the pending days released.', commentLabel: 'Reason for rejection',
     commentRequired: true, success: 'Request rejected.',
   },
   HR_APPROVE: {
-    label: 'Approve', tone: 'good', icon: 'check', title: 'Give final approval',
+    label: 'Approve Request', tone: 'good', icon: 'check', title: 'Give final approval',
     message: 'This is the final approval. The days move from pending to used in the employee\'s balance.',
     commentLabel: 'Comment', success: 'Leave approved and balance updated.',
   },
   HR_REJECT: {
-    label: 'Reject', tone: 'danger', icon: 'x', title: 'Reject leave request',
+    label: 'Reject Request', tone: 'danger', icon: 'x', title: 'Reject leave request',
     message: 'The employee will be notified and the pending days released.', commentLabel: 'Reason for rejection',
     commentRequired: true, success: 'Request rejected.',
   },
@@ -56,8 +57,11 @@ const ACTIONS = {
   },
 };
 
-const ORDER = ['MANAGER_APPROVE', 'HR_APPROVE', 'APPROVE_CANCELLATION', 'MANAGER_REJECT', 'HR_REJECT',
-  'REJECT_CANCELLATION', 'REQUEST_CANCELLATION', 'WITHDRAW'];
+// Negative actions first so the primary (approve) action sits at the end of the action bar.
+const ORDER = ['WITHDRAW', 'REQUEST_CANCELLATION', 'MANAGER_REJECT', 'HR_REJECT', 'REJECT_CANCELLATION',
+  'MANAGER_APPROVE', 'HR_APPROVE', 'APPROVE_CANCELLATION'];
+// Statuses in which this request's days are counted in the balance (reserved as pending, or used).
+const HOLDS_DAYS = ['PENDING_MANAGER', 'PENDING_HR', 'ESCALATED', 'APPROVED', 'CANCEL_REQUESTED'];
 
 export default function LeaveDetailPage() {
   const { id } = useParams();
@@ -74,33 +78,36 @@ export default function LeaveDetailPage() {
         const isOwner = request.employeeId === user.employeeId;
         const config = pending && ACTIONS[pending];
         const approvingWithWarning = pending?.includes('APPROVE') && teamConflicts?.teamLeaveWarning;
+        const holdsDays = HOLDS_DAYS.includes(request.status);
+        const isReview = actions.some((a) => a.startsWith('MANAGER_') || a.startsWith('HR_'));
         return (
           <div className="stack">
             <div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: -12 }} onClick={() => navigate(-1)}>
                 <Icon name="arrowLeft" size={16} /> Back
               </button>
             </div>
-            <div className="page-header" style={{ marginBottom: 0 }}>
-              <div>
-                <div className="row" style={{ gap: 10 }}>
-                  <h1>{isOwner ? 'Your leave request' : `${request.employeeName}'s leave request`}</h1>
-                  <StatusBadge status={request.status} />
+
+            <section className="card">
+              <div className="hero">
+                <div style={{ minWidth: 0 }}>
+                  <span className="eyebrow">Leave Request · <span className="code">{requestCode(request.id)}</span></span>
+                  <div className="hero-title">
+                    {isOwner ? request.leaveTypeName : `${request.employeeName} · ${request.leaveTypeName}`}
+                  </div>
+                  <div className="hero-meta">
+                    <span><Icon name="calendar" size={15} />{formatRange(request.startDate, request.endDate)}</span>
+                    <span><Icon name="clock" size={15} />{plural(request.days, 'working day')}</span>
+                    <span><Icon name="user" size={15} />Approver: {request.approverName}</span>
+                  </div>
                 </div>
-                <p>Request #{request.id} · submitted {formatDateTime(request.createdAt)}</p>
+                <StatusBadge status={request.status} />
               </div>
-              {actions.length > 0 && (
-                <div className="action-bar">
-                  {actions.map((a) => (
-                    <button key={a} type="button"
-                      className={`btn ${ACTIONS[a].tone === 'good' ? 'btn-good' : 'btn-danger'}`}
-                      onClick={() => { setSuccess(null); setPending(a); }}>
-                      <Icon name={ACTIONS[a].icon} size={16} /> {ACTIONS[a].label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+              <hr className="divider" />
+              <div className="card-body">
+                <ApprovalStepper status={request.status} history={history} />
+              </div>
+            </section>
 
             {success && <Alert tone="success">{success}</Alert>}
             {request.status === 'ESCALATED' && (
@@ -113,15 +120,23 @@ export default function LeaveDetailPage() {
             <div className="split">
               <div className="stack">
                 <section className="card">
-                  <div className="card-header"><h2>Request details</h2></div>
-                  <div className="card-body stack">
+                  <div className="card-header"><h2>Request Details</h2></div>
+                  <div className="card-body stack" style={{ gap: 20 }}>
+                    {!isOwner && (
+                      <div className="cell-person">
+                        <span className="avatar lg">{initials(request.employeeName)}</span>
+                        <div>
+                          <div className="cell-main" style={{ fontSize: 15 }}>{request.employeeName}</div>
+                          <div className="cell-sub">{request.employeeCode} · {request.teamName || 'No team'}</div>
+                        </div>
+                      </div>
+                    )}
                     <dl className="detail-grid">
-                      <div><dt>Employee</dt><dd>{request.employeeName}</dd><span className="cell-sub">{request.employeeCode} · {request.teamName || 'No team'}</span></div>
                       <div><dt>Leave type</dt><dd><LeaveTypeChip code={request.leaveTypeCode} name={request.leaveTypeName} /></dd></div>
+                      <div><dt>Dates</dt><dd>{formatRange(request.startDate, request.endDate)}</dd></div>
                       <div><dt>Days charged</dt><dd className="num">{plural(request.days, 'working day')}</dd></div>
-                      <div><dt>Start date</dt><dd>{formatDate(request.startDate)}</dd></div>
-                      <div><dt>End date</dt><dd>{formatDate(request.endDate)}</dd></div>
-                      <div><dt>Approving manager</dt><dd>{request.approverName}</dd></div>
+                      <div><dt>Submitted</dt><dd>{formatDateTime(request.createdAt)}</dd></div>
+                      <div><dt>Last updated</dt><dd>{formatDateTime(request.updatedAt)}</dd></div>
                       <div>
                         <dt>Team absence at submission</dt>
                         <dd className="row" style={{ gap: 6 }}>
@@ -130,10 +145,9 @@ export default function LeaveDetailPage() {
                           {!request.teamLeaveWarning && request.hasTeamConflict && <span className="info-pill">Overlap</span>}
                         </dd>
                       </div>
-                      <div><dt>Last updated</dt><dd>{formatDateTime(request.updatedAt)}</dd></div>
                     </dl>
                     <div>
-                      <h3 style={{ marginBottom: 6 }}>Reason</h3>
+                      <h3 style={{ marginBottom: 8, color: 'var(--text-2)', fontWeight: 500 }}>Reason</h3>
                       <div className="reason-box">{request.reason}</div>
                     </div>
                   </div>
@@ -143,27 +157,65 @@ export default function LeaveDetailPage() {
                   <section className="card">
                     <div className="card-header">
                       <div>
-                        <h2>Team availability</h2>
-                        <p>Live check against {request.teamName || 'the team'}'s current leave.</p>
+                        <h2>Team Conflicts</h2>
+                        <p>Live check against {request.teamName || 'the team'}'s current leave. Warnings never block a decision.</p>
                       </div>
-                      {request.teamId && <Link to={`/team-calendar?team=${request.teamId}&month=${request.startDate.slice(0, 7)}`} className="btn btn-sm">Open calendar</Link>}
+                      {request.teamId && user.role !== 'EMPLOYEE' && (
+                        <Link to={`/team-calendar?team=${request.teamId}&month=${request.startDate.slice(0, 7)}`} className="btn btn-sm">Open calendar</Link>
+                      )}
                     </div>
                     <div className="card-body"><ConflictPanel analysis={teamConflicts} /></div>
                   </section>
                 )}
-              </div>
 
-              <div className="stack">
-                <section>
-                  <h2 style={{ marginBottom: 10 }}>{isOwner ? 'Your balance' : 'Employee balance'} ({balance.year})</h2>
-                  <BalanceCard balance={balance} />
-                </section>
                 <section className="card">
-                  <div className="card-header"><h2>Approval history</h2></div>
+                  <div className="card-header"><h2>Approval History</h2></div>
                   <div className="card-body"><HistoryTimeline history={history} /></div>
                 </section>
               </div>
+
+              <div className="stack">
+                <section className="card">
+                  <div className="card-header plain">
+                    <h2>Balance Impact</h2>
+                    <span className="muted small">{balance.leaveTypeName} · {balance.year}</span>
+                  </div>
+                  <div className="card-body" style={{ paddingTop: 8 }}>
+                    <dl className="kv">
+                      {holdsDays && (
+                        <div><dt>Before this request</dt><dd>{num(Number(balance.remaining) + request.days)} days</dd></div>
+                      )}
+                      <div>
+                        <dt>{request.status === 'APPROVED' || request.status === 'CANCEL_REQUESTED' ? 'This request (used)' : holdsDays ? 'This request (reserved)' : 'This request'}</dt>
+                        <dd>{holdsDays ? `− ${plural(request.days, 'day')}` : 'Not charged'}</dd>
+                      </div>
+                      <div><dt>Total reserved</dt><dd>{num(balance.pending)} days</dd></div>
+                      <div className="total"><dt>Available</dt><dd>{num(balance.remaining)} days</dd></div>
+                    </dl>
+                  </div>
+                </section>
+                <BalanceCard balance={balance} />
+              </div>
             </div>
+
+            {actions.length > 0 && (
+              <div className={`sticky-actions ${isReview ? '' : 'static'}`}>
+                <span className="muted small">
+                  {isReview
+                    ? `${isOwner ? 'Your' : `${request.employeeName}'s`} request is waiting for your decision.`
+                    : 'Actions available for this request.'}
+                </span>
+                <div className="action-bar">
+                  {actions.map((a) => (
+                    <button key={a} type="button"
+                      className={`btn ${ACTIONS[a].tone === 'good' ? 'btn-primary' : 'btn-danger'}`}
+                      onClick={() => { setSuccess(null); setPending(a); }}>
+                      <Icon name={ACTIONS[a].icon} size={16} /> {ACTIONS[a].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {config && (
               <ConfirmDialog
@@ -174,7 +226,7 @@ export default function LeaveDetailPage() {
                     : config.message
                 }
                 confirmLabel={config.label}
-                tone={config.tone}
+                tone={config.tone === 'good' ? 'primary' : config.tone}
                 commentLabel={config.commentLabel}
                 commentRequired={config.commentRequired}
                 onClose={() => setPending(null)}

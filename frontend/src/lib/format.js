@@ -26,6 +26,7 @@ export const formatDateTime = (instant) => (instant ? dateTimeFmt.format(new Dat
 export function formatRange(start, end) {
   if (!start) return '—';
   if (start === end) return formatDate(start);
+  if (start.slice(0, 7) === end.slice(0, 7)) return `${parseDate(start).getDate()} – ${formatDate(end)}`;
   return `${formatShortDate(start)} – ${formatDate(end)}`;
 }
 
@@ -35,7 +36,7 @@ export function relativeTime(instant) {
   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
   if (diff < 7 * 86400) return `${Math.floor(diff / 86400)} d ago`;
-  return formatDateTime(instant);
+  return dateFmt.format(new Date(instant));
 }
 
 export const plural = (n, word) => `${n} ${word}${Number(n) === 1 ? '' : 's'}`;
@@ -76,3 +77,25 @@ export const ACTION_LABELS = {
 
 export const humanize = (value) =>
   value ? value.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) : '';
+
+/** Display reference for a leave request, e.g. LM-0042. */
+export const requestCode = (id) => `LM-${String(id).padStart(4, '0')}`;
+
+export function initials(name) {
+  return (name || '?').split(' ').filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+}
+
+export const firstName = (name) => (name || '').split(' ')[0];
+
+export function greeting(date = new Date()) {
+  const h = date.getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+export function addDays(iso, n) {
+  const d = parseDate(iso);
+  d.setDate(d.getDate() + n);
+  return toIsoDate(d);
+}

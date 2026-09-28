@@ -4,7 +4,7 @@ import PageHeader from '../../components/PageHeader';
 import StatusBadge from '../../components/StatusBadge';
 import { AsyncBoundary, EmptyState } from '../../components/States';
 import useAsync from '../../hooks/useAsync';
-import { ACTION_LABELS, formatDateTime } from '../../lib/format';
+import { ACTION_LABELS, formatDateTime, requestCode } from '../../lib/format';
 
 const PAGE_SIZE = 25;
 
@@ -22,7 +22,7 @@ export default function AuditLogPage() {
 
   return (
     <>
-      <PageHeader title="Audit history" subtitle="Every state change, balance movement and configuration change, newest first.">
+      <PageHeader title="Audit Log" subtitle="Every state change, balance movement and configuration change, newest first.">
         <select className="select" style={{ width: 220 }} aria-label="Filter by action" value={action}
           onChange={(e) => update({ action: e.target.value, page: '' })}>
           <option value="">All actions</option>
@@ -39,7 +39,7 @@ export default function AuditLogPage() {
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
-                      <tr><th>When</th><th>Actor</th><th>Action</th><th>Request</th><th>Status change</th><th>Details</th></tr>
+                      <tr><th>Timestamp</th><th>User</th><th>Action</th><th>Request ID</th><th>Previous state</th><th>New state</th><th>Details</th></tr>
                     </thead>
                     <tbody>
                       {result.content.map((e) => (
@@ -47,13 +47,10 @@ export default function AuditLogPage() {
                           <td className="nowrap muted">{formatDateTime(e.createdAt)}</td>
                           <td><div className="cell-main">{e.actorName}</div><div className="cell-sub">{e.actorRole.toLowerCase()}</div></td>
                           <td className="nowrap">{ACTION_LABELS[e.action] || e.action}</td>
-                          <td>{e.leaveRequestId ? <Link to={`/leaves/${e.leaveRequestId}`}>#{e.leaveRequestId}</Link> : <span className="muted">—</span>}</td>
-                          <td className="nowrap">
-                            {e.newStatus && e.previousStatus !== e.newStatus ? (
-                              <>{e.previousStatus && <><StatusBadge status={e.previousStatus} /> → </>}<StatusBadge status={e.newStatus} /></>
-                            ) : <span className="muted">—</span>}
-                          </td>
-                          <td style={{ maxWidth: 360 }}>{e.comment || <span className="muted">—</span>}</td>
+                          <td className="nowrap">{e.leaveRequestId ? <Link to={`/leaves/${e.leaveRequestId}`} className="code">{requestCode(e.leaveRequestId)}</Link> : <span className="muted">—</span>}</td>
+                          <td>{e.previousStatus && e.previousStatus !== e.newStatus ? <StatusBadge status={e.previousStatus} /> : <span className="muted">—</span>}</td>
+                          <td>{e.newStatus && e.previousStatus !== e.newStatus ? <StatusBadge status={e.newStatus} /> : <span className="muted">—</span>}</td>
+                          <td className="small" style={{ maxWidth: 320, color: 'var(--text-2)' }}>{e.comment || <span className="muted">—</span>}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api';
 import { errorMessage, fieldErrors } from '../../api/client';
-import ConflictPanel from '../../components/ConflictPanel';
 import Icon from '../../components/Icon';
 import PageHeader from '../../components/PageHeader';
 import { Alert, AsyncBoundary, Loading } from '../../components/States';
 import StatusBadge from '../../components/StatusBadge';
 import useAsync from '../../hooks/useAsync';
-import { formatDate, formatRange, num, plural, todayIso } from '../../lib/format';
+import { formatDate, formatRange, formatShortDate, num, plural, requestCode, todayIso } from '../../lib/format';
 
 const EMPTY = { leaveTypeId: '', startDate: '', endDate: '', reason: '' };
 const PREVIEW_DELAY_MS = 350;
@@ -27,6 +26,8 @@ function validate(form) {
 
 export default function ApplyLeavePage() {
   const policies = useAsync(() => api.policies(), []);
+  // Current-year balances so the form can show what is available before dates are chosen.
+  const balances = useAsync(() => api.myBalances(new Date().getFullYear()), []);
   const [form, setForm] = useState(EMPTY);
   const [touched, setTouched] = useState({});
   const [serverErrors, setServerErrors] = useState({});
@@ -82,6 +83,7 @@ export default function ApplyLeavePage() {
         reason: form.reason.trim(),
       });
       setSubmitted(result);
+      balances.reload();
       setForm(EMPTY);
       setTouched({});
       setPreview({ data: null, loading: false, error: null });
@@ -97,7 +99,7 @@ export default function ApplyLeavePage() {
     const { request, teamConflicts, balance } = submitted;
     return (
       <>
-        <PageHeader title="Request submitted" />
+        <PageHeader title="Request submitted" subtitle={`Reference ${requestCode(request.id)}`} />
         <div className="card">
           <div className="card-body stack">
             <Alert tone="success" title="Your leave request was submitted">
@@ -125,18 +127,22 @@ export default function ApplyLeavePage() {
 
   return (
     <>
-      <PageHeader
-        title="Apply for leave"
-        subtitle="Weekends and public holidays are not charged unless the leave policy says otherwise."
-      />
+      <PageHeader title="Apply for Leave" subtitle="Submit a leave request for manager approval." />
       <AsyncBoundary state={policies}>
         {(list) => {
           const active = list.filter((p) => p.active);
           const selected = active.find((p) => String(p.leaveTypeId) === String(form.leaveTypeId));
+          const balanceFor = (typeId) => balances.data?.find((b) => String(b.leaveTypeId) === String(typeId));
+          const selectedBalance = balanceFor(form.leaveTypeId);
           return (
             <div className="split">
               <form className="card" onSubmit={submit} noValidate>
-                <div className="card-header"><h2>Leave details</h2></div>
+                <div className="card-header">
+                  <div>
+                    <h2>Leave details</h2>
+                    <p>Weekends and public holidays are not charged unless the leave policy says otherwise.</p>
+                  </div>
+                </div>
                 <div className="card-body form-grid">
                   <div className="field full">
                     <label htmlFor="leaveType">Leave type</label>
@@ -149,12 +155,22 @@ export default function ApplyLeavePage() {
                       aria-invalid={!!show('leaveTypeId')}
                     >
                       <option value="">Select a leave type…</option>
-                      {active.map((p) => (
-                        <option key={p.leaveTypeId} value={p.leaveTypeId}>
-                          {p.leaveTypeName} — {num(p.annualEntitlement)} days/year
-                        </option>
-                      ))}
+                      {active.map((p) => {
+                        const b = balanceFor(p.leaveTypeId);
+                        return (
+                          <option key={p.leaveTypeId} value={p.leaveTypeId}>
+                            {p.leaveTypeName} — {b ? `${num(b.remaining)} days available` : `${num(p.annualEntitlement)} days/year`}
+                          </option>
+                        );
+                      })}
                     </select>
+                    {selectedBalance && (
+                      <span className="hint">
+                        You can apply for up to <strong>{plural(num(selectedBalance.remaining), 'day')}</strong> of{' '}
+                        {selectedBalance.leaveTypeName} this year
+                        {Number(selectedBalance.pending) > 0 && ` (${num(selectedBalance.pending)} already pending approval)`}.
+                      </span>
+                    )}
                     {selected?.description && <span className="hint">{selected.description}</span>}
                     {show('leaveTypeId') && <span className="error">{errors.leaveTypeId}</span>}
                   </div>
@@ -186,6 +202,12 @@ export default function ApplyLeavePage() {
                     />
                     {show('endDate') && <span className="error">{errors.endDate}</span>}
                   </div>
+                  <div className="full readout" aria-live="polite">
+                    <span className="muted">Working days</span>
+                    <strong>
+                      {!canPreview ? '—' : preview.data ? plural(preview.data.chargeableDays, 'day') : '…'}
+                    </strong>
+                  </div>
                   <div className="field full">
                     <label htmlFor="reason">Reason</label>
                     <textarea
@@ -204,15 +226,15 @@ export default function ApplyLeavePage() {
                   {submitError && (
                     <div className="full"><Alert tone="error" title="Could not submit">{submitError}</Alert></div>
                   )}
-                  <div className="full form-actions">
+                  <div className="full form-actions" style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
                     <Link to="/dashboard" className="btn">Cancel</Link>
                     <button type="submit" className="btn btn-primary" disabled={submitting || blocked}>
-                      {submitting ? 'Submitting…' : 'Submit request'}
+                      {submitting ? 'Submitting…' : 'Submit Request'}
                     </button>
                   </div>
                 </div>
               </form>
-              <PreviewPanel preview={preview} canPreview={canPreview} />
+              <PreviewPanel preview={preview} canPreview={canPreview} selectedBalance={selectedBalance} />
             </div>
           );
         }}
@@ -221,13 +243,21 @@ export default function ApplyLeavePage() {
   );
 }
 
-function PreviewPanel({ preview, canPreview }) {
+function PreviewPanel({ preview, canPreview, selectedBalance }) {
   if (!canPreview) {
     return (
       <aside className="card">
-        <div className="card-header"><h2>Summary</h2></div>
-        <div className="card-body muted">
-          Pick a leave type and dates to see how many days will be charged, your remaining balance and team availability.
+        <div className="card-header plain"><h2>Leave Balance</h2></div>
+        <div className="card-body" style={{ paddingTop: 10 }}>
+          {selectedBalance ? (
+            <dl className="kv">
+              <div><dt>Available</dt><dd>{num(selectedBalance.remaining)} days</dd></div>
+              <div><dt>Reserved for pending requests</dt><dd>{num(selectedBalance.pending)} days</dd></div>
+            </dl>
+          ) : null}
+          <p className="muted small" style={{ marginTop: selectedBalance ? 12 : 0 }}>
+            Pick a leave type and dates to see how many working days will be charged, your remaining balance and team availability.
+          </p>
         </div>
       </aside>
     );
@@ -240,27 +270,30 @@ function PreviewPanel({ preview, canPreview }) {
   }
   const p = preview.data;
   if (!p) return null;
+  const conflicts = p.teamConflicts;
+  const busyDays = (conflicts?.affectedDates || []).filter((d) => d.unavailableCount > 0);
   return (
     <aside className="stack" aria-live="polite">
       <section className="card">
-        <div className="card-header">
-          <h2>Summary</h2>
+        <div className="card-header plain">
+          <h2>Leave Balance</h2>
           {preview.loading && <div className="spinner" style={{ width: 16, height: 16 }} />}
         </div>
-        <div className="card-body stack" style={{ gap: 14 }}>
-          <dl className="detail-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div><dt>Days charged</dt><dd className="num" style={{ fontSize: 22 }}>{p.chargeableDays}</dd></div>
-            <div><dt>Calendar days</dt><dd className="num" style={{ fontSize: 22 }}>{p.calendarDays}</dd></div>
-            <div><dt>Weekend days excluded</dt><dd className="num">{p.weekendDays}</dd></div>
-            <div><dt>Holidays excluded</dt><dd className="num">{p.holidayDays}</dd></div>
-            <div><dt>Remaining now</dt><dd className="num">{num(p.balance.remaining)} days</dd></div>
-            <div>
-              <dt>Remaining after</dt>
-              <dd className="num" style={{ color: p.sufficientBalance ? undefined : 'var(--critical)' }}>
-                {num(p.remainingAfter)} days
-              </dd>
+        <div className="card-body stack" style={{ gap: 16, paddingTop: 10 }}>
+          <DaysVsBalance applying={p.chargeableDays} available={p.balance.remaining} sufficient={p.sufficientBalance} />
+          <dl className="kv">
+            <div><dt>Available</dt><dd>{num(p.balance.remaining)} days</dd></div>
+            <div><dt>This request</dt><dd>{plural(p.chargeableDays, 'day')}</dd></div>
+            <div className="total">
+              <dt>Remaining</dt>
+              <dd style={{ color: p.sufficientBalance ? undefined : 'var(--critical)' }}>{num(p.remainingAfter)} days</dd>
             </div>
           </dl>
+          <p className="small muted">
+            {p.calendarDays} calendar {p.calendarDays === 1 ? 'day' : 'days'}
+            {p.weekendDays > 0 && ` · ${p.weekendDays} weekend excluded`}
+            {p.holidayDays > 0 && ` · ${p.holidayDays} holiday excluded`}
+          </p>
           {p.holidays.length > 0 && (
             <p className="small muted">
               <Icon name="sun" size={14} /> {p.holidays.map((h) => `${h.name} (${formatDate(h.date)})`).join(', ')}
@@ -269,15 +302,64 @@ function PreviewPanel({ preview, canPreview }) {
           {p.blockingIssues.map((issue) => <Alert key={issue} tone="error">{issue}</Alert>)}
         </div>
       </section>
-      {p.teamConflicts?.teamId && (
+      {conflicts?.teamId && (
         <section className="card">
-          <div className="card-header"><h2>Team availability</h2></div>
-          <div className="card-body">
-            <ConflictPanel analysis={p.teamConflicts} compact />
-            <p className="small muted" style={{ marginTop: 10 }}>Conflicts never block your request — your manager decides.</p>
+          <div className="card-header plain"><h2>Team Conflicts</h2></div>
+          <div className="card-body stack" style={{ gap: 14, paddingTop: 10 }}>
+            {conflicts.hasConflict ? (
+              <>
+                <Alert tone={conflicts.teamLeaveWarning ? 'serious' : 'warn'} title="Conflict detected">
+                  {conflicts.warningMessage}
+                </Alert>
+                <ul className="people-list">
+                  {busyDays.slice(0, 6).map((d) => (
+                    <li key={d.date}>
+                      <Icon name="users" size={15} />
+                      <span>{d.unavailableCount} of {d.teamSize} teammates away</span>
+                      <span className="when">{formatShortDate(d.date)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <Alert tone="success" title="No overlapping leave">Nobody else in {conflicts.teamName} is away on these dates.</Alert>
+            )}
+            <p className="small muted">Conflicts are shown as warnings and do not prevent submission.</p>
           </div>
         </section>
       )}
     </aside>
+  );
+}
+
+/** Headline comparison of the days being requested against the balance still available. */
+function DaysVsBalance({ applying, available, sufficient }) {
+  const avail = Math.max(0, Number(available) || 0);
+  const pct = avail > 0 ? Math.min(100, (applying / avail) * 100) : applying > 0 ? 100 : 0;
+  return (
+    <div className="days-vs-balance">
+      <div className="days-vs-balance-figures">
+        <div>
+          <span className="label">Applying for</span>
+          <strong className="num">{plural(applying, 'day')}</strong>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <span className="label">Available</span>
+          <strong className="num">{plural(num(available), 'day')}</strong>
+        </div>
+      </div>
+      <div
+        className="meter"
+        role="img"
+        aria-label={`Applying for ${applying} of ${num(available)} available days`}
+      >
+        <span className={sufficient ? 'used' : 'over'} style={{ width: `${pct}%` }} />
+      </div>
+      {!sufficient && (
+        <span className="small" style={{ color: 'var(--critical)' }}>
+          {num(applying - Number(available))} day(s) more than your balance allows.
+        </span>
+      )}
+    </div>
   );
 }

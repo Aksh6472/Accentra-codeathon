@@ -46,8 +46,8 @@ export default function LoginPage() {
     <div className="login-page">
       <section className="login-hero">
         <div className="brand" style={{ padding: 0 }}>
-          <span className="brand-mark"><Icon name="calendar" size={16} /></span>
-          LeaveFlow
+          <span className="brand-mark"><Icon name="leaf" size={16} /></span>
+          LEAVEFLOW
         </div>
         <div>
           <h1>Leave management that keeps teams running.</h1>

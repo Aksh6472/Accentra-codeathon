@@ -18,7 +18,7 @@ export default function ManagerApprovalsPage() {
 
   return (
     <>
-      <PageHeader title="Approvals" subtitle="Open a request to see the balance, team conflicts and history, then approve or reject it." />
+      <PageHeader title="Approval Queue" subtitle="Open a request to see the balance, team conflicts and history, then approve or reject it." />
       <AsyncBoundary state={state}>
         {([pending, escalated, history]) => {
           const lists = { pending, escalated, history };
@@ -35,6 +35,7 @@ export default function ManagerApprovalsPage() {
               </div>
               <div className="card">
                 <LeaveTable leaves={lists[active.key]} showEmployee showWarnings={active.key !== 'history'}
+                  actionLabel={active.key === 'pending' ? 'Review' : 'View'}
                   emptyTitle="Nothing here" emptyText={active.empty} />
               </div>
             </>

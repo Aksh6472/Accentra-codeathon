@@ -2,6 +2,8 @@ package com.accentra.leavemanagement.controller;
 
 import com.accentra.leavemanagement.dto.AuditLogResponse;
 import com.accentra.leavemanagement.dto.DecisionRequest;
+import com.accentra.leavemanagement.dto.EmployeeBalanceDetailResponse;
+import com.accentra.leavemanagement.dto.EmployeeDirectoryResponse;
 import com.accentra.leavemanagement.dto.LeaveRequestResponse;
 import com.accentra.leavemanagement.dto.PageResponse;
 import com.accentra.leavemanagement.enums.AuditAction;
@@ -11,6 +13,7 @@ import com.accentra.leavemanagement.security.AuthenticatedUser;
 import com.accentra.leavemanagement.service.Actor;
 import com.accentra.leavemanagement.service.ApprovalService;
 import com.accentra.leavemanagement.service.AuditService;
+import com.accentra.leavemanagement.service.EmployeeDirectoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,6 +38,7 @@ public class HrController {
 
     private final ApprovalService approvalService;
     private final AuditService auditService;
+    private final EmployeeDirectoryService employeeDirectoryService;
 
     /** Requests awaiting HR: manager-approved requests and cancellation requests. */
     @GetMapping("/leaves/pending")
@@ -78,6 +82,17 @@ public class HrController {
                                                    @PathVariable Long id,
                                                    @Valid @RequestBody(required = false) DecisionRequest body) {
         return approvalService.decide(Actor.of(user), id, LeaveAction.REJECT_CANCELLATION, comment(body));
+    }
+
+    @GetMapping("/employees")
+    public List<EmployeeDirectoryResponse> employees(@RequestParam(required = false) Integer year) {
+        return employeeDirectoryService.directory(year);
+    }
+
+    @GetMapping("/employees/{id}/balances")
+    public EmployeeBalanceDetailResponse employeeBalances(@PathVariable Long id,
+                                                          @RequestParam(required = false) Integer year) {
+        return employeeDirectoryService.balanceDetail(id, year);
     }
 
     @GetMapping("/audit")
