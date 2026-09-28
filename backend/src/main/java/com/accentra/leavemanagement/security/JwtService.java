@@ -25,7 +25,16 @@ public class JwtService {
     private final Clock clock;
 
     public JwtService(AppProperties properties, Clock clock) {
-        byte[] keyBytes = Decoders.BASE64.decode(properties.jwt().secret());
+        String secret = properties.jwt().secret();
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("APP_JWT_SECRET is not set. Generate one with: openssl rand -base64 48");
+        }
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(secret);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("APP_JWT_SECRET must be Base64. Generate one with: openssl rand -base64 48", e);
+        }
         if (keyBytes.length < MIN_KEY_BYTES) {
             throw new IllegalStateException("app.jwt.secret must be a Base64 value of at least 256 bits");
         }
