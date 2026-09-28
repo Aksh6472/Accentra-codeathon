@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:leave_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+app:
+  escalation:
+    # The scheduler never fires during tests; escalation is triggered explicitly.
+    initial-delay-ms: 3600000
+    check-interval-ms: 3600000
+  seed:
+    enabled: true
