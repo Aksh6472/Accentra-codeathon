@@ -1,0 +1,1381 @@
+# CLAUDE.md
+
+## Project: Leave Management System
+
+You are working on a production-quality **Leave Management System** designed for a technical codeathon demonstration.
+
+The system manages employee leave requests through a multi-level approval workflow:
+
+```text
+EMPLOYEE
+   ↓
+MANAGER
+   ↓
+HR
+   ↓
+APPROVED
+```
+
+The system must prioritize:
+
+* Correct business logic
+* Clean architecture
+* Security
+* Maintainability
+* Good UX
+* Reliable approval workflows
+* Testability
+* Demonstration readiness
+
+Do not implement fake, placeholder, or frontend-only functionality.
+
+---
+
+# 1. Technology Stack
+
+## Backend
+
+Use:
+
+* Java 17+
+* Spring Boot 3+
+* Spring Web
+* Spring Data JPA
+* Spring Security
+* Bean Validation
+* PostgreSQL
+* Maven
+* Lombok where appropriate
+* JWT authentication
+* Spring Scheduler
+* JUnit
+* Mockito
+
+## Frontend
+
+Use:
+
+* React
+* Vite
+* React Router
+* Axios
+* Modern responsive CSS
+
+## Architecture
+
+Use a **monolithic Spring Boot backend with a React frontend**.
+
+Do not introduce unnecessary microservices.
+
+---
+
+# 2. Development Rules
+
+Before making changes:
+
+1. Inspect the existing repository.
+2. Understand the current architecture.
+3. Reuse existing working code where appropriate.
+4. Do not rewrite working functionality unnecessarily.
+5. Identify dependencies between modules before modifying them.
+6. Keep changes focused and maintainable.
+
+When implementing a feature:
+
+1. Implement backend business logic first.
+2. Implement API endpoints.
+3. Implement frontend integration.
+4. Add validation and error handling.
+5. Add tests for important business rules.
+6. Run the relevant build/tests.
+7. Fix all errors before moving to the next feature.
+
+Never assume a command or file exists. Inspect the repository first.
+
+---
+
+# 3. Core Architecture
+
+Use a layered Spring Boot architecture.
+
+Recommended structure:
+
+```text
+src/main/java/com/example/leavemanagement/
+
+├── config/
+├── controller/
+├── dto/
+├── entity/
+├── enums/
+├── exception/
+├── repository/
+├── security/
+├── service/
+│   ├── LeaveService
+│   ├── ApprovalService
+│   ├── LeaveBalanceService
+│   ├── LeaveProrationService
+│   ├── LeaveDayCalculationService
+│   ├── ConflictDetectionService
+│   ├── EscalationService
+│   ├── NotificationService
+│   ├── PolicyService
+│   ├── AuditService
+│   └── LeaveStateMachineService
+└── scheduler/
+```
+
+Rules:
+
+* Controllers must remain thin.
+* Business logic belongs in services.
+* Repositories handle persistence.
+* DTOs must be used for API requests/responses.
+* Do not expose JPA entities directly.
+* Use transactions for state-changing operations.
+* Use centralized exception handling.
+* Avoid duplicated business logic.
+* Follow SOLID principles.
+
+---
+
+# 4. User Roles
+
+There are three roles:
+
+```text
+EMPLOYEE
+MANAGER
+HR
+```
+
+## EMPLOYEE
+
+Can:
+
+* Apply for leave
+* View own leave requests
+* View leave balance
+* View leave history
+* Request cancellation of eligible approved leave
+* View notifications
+
+Cannot:
+
+* Approve leave
+* Access other employees' private requests
+* Access manager or HR functionality
+
+---
+
+## MANAGER
+
+Can:
+
+* View requests from direct reports
+* Approve manager-stage requests
+* Reject manager-stage requests
+* View team availability
+* View team conflicts
+* View excessive team leave warnings
+* View escalated requests
+* View approval history
+
+Cannot:
+
+* Perform HR-stage approval
+* Access unrelated teams
+
+---
+
+## HR
+
+Can:
+
+* View requests waiting for HR approval
+* Approve HR-stage requests
+* Reject HR-stage requests
+* View escalated requests
+* View organization/team leave information
+* Configure leave policies
+* View analytics
+* View audit history
+* Manage holidays
+
+HR must still respect the state machine.
+
+---
+
+# 5. Authentication and Authorization
+
+Use JWT authentication.
+
+Requirements:
+
+* Passwords must be securely hashed.
+* Never store plaintext passwords.
+* Protect backend endpoints.
+* Protect frontend routes.
+* Enforce authorization on the backend.
+* Do not rely on frontend button visibility for security.
+
+Authorization rules:
+
+```text
+EMPLOYEE
+→ Own resources only
+
+MANAGER
+→ Direct reports/team resources
+
+HR
+→ HR and organization-level resources
+```
+
+An employee must never be able to approve a request by directly calling an API.
+
+A manager must never be able to perform HR-stage approval.
+
+HR must not bypass the state machine.
+
+---
+
+# 6. Leave Request State Machine
+
+The only valid states are:
+
+```text
+PENDING_MANAGER
+PENDING_HR
+APPROVED
+REJECTED
+ESCALATED
+CANCEL_REQUESTED
+CANCELLED
+```
+
+Normal flow:
+
+```text
+Employee submits
+      ↓
+PENDING_MANAGER
+      ↓
+Manager approves
+      ↓
+PENDING_HR
+      ↓
+HR approves
+      ↓
+APPROVED
+```
+
+Rejection:
+
+```text
+PENDING_MANAGER → REJECTED
+PENDING_HR → REJECTED
+```
+
+Escalation:
+
+```text
+PENDING_MANAGER
+      ↓
+Timeout
+      ↓
+ESCALATED
+```
+
+Cancellation:
+
+```text
+APPROVED
+    ↓
+CANCEL_REQUESTED
+    ↓
+CANCELLED
+```
+
+## Critical Rule
+
+Do not allow arbitrary status changes.
+
+Create a dedicated:
+
+```text
+LeaveStateMachineService
+```
+
+Every transition must validate:
+
+* Current state
+* Actor
+* Actor role
+* Requested action
+* Business rules
+
+Never allow controllers to directly set a request status.
+
+---
+
+# 7. Leave Application Rules
+
+An employee submits:
+
+* Leave type
+* Start date
+* End date
+* Reason
+
+When a leave request is submitted:
+
+1. Validate the date range.
+2. Calculate leave days.
+3. Exclude weekends.
+4. Exclude configured holidays.
+5. Check leave balance.
+6. Check employee overlapping leave.
+7. Detect team conflicts.
+8. Calculate team absence percentage.
+9. Check the configured team absence threshold.
+10. Create the request as `PENDING_MANAGER`.
+11. Create an audit entry.
+12. Create a manager notification.
+
+## Important
+
+Team conflict must **never automatically reject leave**.
+
+Excessive team absence must **never automatically reject leave**.
+
+These conditions create warnings that the manager can consider.
+
+---
+
+# 8. Leave Day Calculation
+
+Create:
+
+```text
+LeaveDayCalculationService
+```
+
+Centralize all leave-day calculations here.
+
+Default behavior:
+
+```text
+Saturday → excluded
+Sunday → excluded
+Configured holiday → excluded
+```
+
+Do not duplicate date calculation logic elsewhere.
+
+The calculation must correctly handle:
+
+* Normal weekdays
+* Weekends
+* Public holidays
+* Date ranges
+* Holiday/weekend combinations
+
+Business policy may override weekend/holiday behavior if explicitly configured.
+
+---
+
+# 9. Leave Balance
+
+Each employee should have:
+
+```text
+Annual Entitlement
+Allocated Leave
+Used Leave
+Pending Leave
+Remaining Leave
+```
+
+Support multiple leave types.
+
+Example:
+
+```text
+CASUAL
+SICK
+EARNED
+```
+
+Leave policies must come from the database.
+
+Never hard-code annual entitlement values in business logic.
+
+---
+
+# 10. Pro-Rated Leave
+
+Employees joining during the year receive a pro-rated entitlement.
+
+Create:
+
+```text
+LeaveProrationService
+```
+
+The calculation must use:
+
+* Employee joining date
+* Leave type
+* Configured annual entitlement
+* Relevant year
+
+Do not hard-code example values.
+
+Document the proration convention used.
+
+Add tests for:
+
+* Full-year employee
+* Mid-year employee
+* Boundary joining dates
+
+---
+
+# 11. Team Conflict Detection
+
+Create:
+
+```text
+ConflictDetectionService
+```
+
+For every leave request, determine overlapping leave within the employee's team.
+
+The result should include:
+
+* Number of employees unavailable
+* Total team size
+* Absence percentage
+* Affected dates
+* Overlapping employees where appropriate
+
+Example:
+
+```text
+Team size = 10
+Unavailable = 4
+
+Absence = 40%
+```
+
+The conflict is a warning, not an automatic rejection.
+
+---
+
+# 12. Team Absence Threshold
+
+Make the threshold configurable.
+
+Example:
+
+```text
+30%
+```
+
+If team absence exceeds the configured threshold:
+
+```text
+TEAM_LEAVE_WARNING = true
+```
+
+Display a clear warning to the manager.
+
+Example:
+
+```text
+High team absence:
+40% of the team is unavailable on October 12.
+```
+
+The manager remains responsible for the approval decision.
+
+---
+
+# 13. Automatic Escalation
+
+Use Spring Scheduler.
+
+The manager approval timeout must be configurable.
+
+Example:
+
+```text
+24 hours
+```
+
+For demonstrations, the value should be easy to reduce.
+
+The scheduler must:
+
+1. Find `PENDING_MANAGER` requests.
+2. Check their pending duration.
+3. Identify overdue requests.
+4. Change them to `ESCALATED`.
+5. Make them visible to HR.
+6. Create an audit entry.
+7. Create an HR notification.
+
+The scheduler must be idempotent.
+
+A request that has already been escalated must not be escalated repeatedly.
+
+Do not require manual intervention to trigger escalation.
+
+---
+
+# 14. Audit Trail
+
+Create an:
+
+```text
+ApprovalHistory
+```
+
+or:
+
+```text
+AuditLog
+```
+
+entity.
+
+Record:
+
+* Request ID
+* Actor
+* Actor role
+* Action
+* Previous status
+* New status
+* Comment
+* Timestamp
+
+Important actions must be recorded.
+
+Examples:
+
+```text
+Employee → CREATED
+Manager → APPROVED
+HR → APPROVED
+System → ESCALATED
+System → BALANCE_UPDATED
+```
+
+Approval history must be visible from the leave request UI.
+
+---
+
+# 15. Notifications
+
+Implement an in-app notification system.
+
+## Employee
+
+Notify when:
+
+* Leave is submitted
+* Manager approves
+* HR approves
+* Leave is rejected
+* Cancellation is processed
+
+## Manager
+
+Notify when:
+
+* New leave request arrives
+* Team conflict exists
+
+## HR
+
+Notify when:
+
+* Request reaches HR
+* Request is escalated
+
+Use:
+
+```text
+NotificationService
+```
+
+Design it so email/push notifications can be added later.
+
+---
+
+# 16. Leave Cancellation
+
+Employees can request cancellation of eligible upcoming approved leave.
+
+Expected flow:
+
+```text
+APPROVED
+    ↓
+CANCEL_REQUESTED
+    ↓
+CANCELLED
+```
+
+Business rules must determine whether additional approval is required.
+
+When cancellation is finalized:
+
+* Restore leave balance
+* Update request state
+* Create audit record
+* Create notification
+
+Never restore the balance twice.
+
+---
+
+# 17. Policies
+
+Policies must be database-driven.
+
+HR should be able to configure:
+
+* Leave types
+* Annual entitlement
+* Team absence threshold
+* Escalation timeout
+* Holiday calendar
+
+Never hard-code these values in services.
+
+---
+
+# 18. Database Entities
+
+At minimum:
+
+```text
+User
+Employee
+Team
+LeaveRequest
+LeaveType
+LeaveBalance
+LeavePolicy
+ApprovalHistory
+Holiday
+Notification
+```
+
+Use proper JPA relationships.
+
+Use:
+
+* Foreign keys
+* Unique constraints
+* Indexes
+* Validation constraints
+
+Prevent invalid duplicate records.
+
+---
+
+# 19. REST API
+
+Expected API structure:
+
+```text
+POST   /api/auth/login
+
+GET    /api/employees/me
+GET    /api/employees/me/balance
+
+POST   /api/leaves
+GET    /api/leaves/my
+GET    /api/leaves/{id}
+POST   /api/leaves/{id}/cancel
+
+GET    /api/manager/leaves/pending
+POST   /api/manager/leaves/{id}/approve
+POST   /api/manager/leaves/{id}/reject
+
+GET    /api/hr/leaves/pending
+GET    /api/hr/leaves/escalated
+POST   /api/hr/leaves/{id}/approve
+POST   /api/hr/leaves/{id}/reject
+
+GET    /api/teams/{id}/calendar
+GET    /api/teams/{id}/conflicts
+
+GET    /api/notifications
+
+GET    /api/analytics
+
+GET    /api/policies
+PUT    /api/policies/{id}
+```
+
+Endpoint names may be adjusted for consistency with the existing project.
+
+---
+
+# 20. Frontend
+
+Create role-specific dashboards.
+
+## Employee Dashboard
+
+Display:
+
+* Leave balance
+* Pending requests
+* Approved requests
+* Rejected requests
+* Upcoming leave
+* Notifications
+
+Provide:
+
+```text
+Apply for Leave
+```
+
+The application form must include:
+
+* Leave type
+* Start date
+* End date
+* Reason
+
+Show calculated leave days and validation errors.
+
+---
+
+## Manager Dashboard
+
+Display:
+
+* Pending approvals
+* Escalated requests
+* Team availability
+* Conflict warnings
+* Upcoming team leave
+
+Approval details should show:
+
+* Employee
+* Leave type
+* Dates
+* Number of days
+* Reason
+* Remaining balance
+* Team absence
+* Conflict details
+* Approval history
+
+Actions:
+
+```text
+Approve
+Reject
+```
+
+---
+
+## HR Dashboard
+
+Display:
+
+* Pending HR approvals
+* Escalated requests
+* Leave analytics
+* Team availability
+* Policy configuration
+* Audit history
+
+---
+
+# 21. Team Calendar
+
+Create a calendar or calendar-like view showing:
+
+* Employee names
+* Leave dates
+* Leave type
+* Team availability
+* Overlapping leave
+* Excessive absence periods
+
+Conflicts must be visually obvious.
+
+---
+
+# 22. Analytics
+
+Show:
+
+* Total leave requests
+* Approved requests
+* Pending requests
+* Rejected requests
+* Escalated requests
+* Leave utilization
+* Team absence percentage
+* Leave type distribution
+
+Use simple charts where useful.
+
+Do not add unnecessary AI/ML.
+
+---
+
+# 23. UI/UX
+
+The application should look like a professional HR/business application.
+
+Use:
+
+* Clear navigation
+* Consistent spacing
+* Tables
+* Cards
+* Status badges
+* Warning indicators
+* Responsive layouts
+* Clear typography
+
+Statuses:
+
+```text
+PENDING
+APPROVED
+REJECTED
+ESCALATED
+CANCEL_REQUESTED
+CANCELLED
+```
+
+Provide:
+
+* Loading states
+* Empty states
+* Error states
+* Form validation
+* Confirmation dialogs
+* Responsive design
+
+Avoid unnecessary animations.
+
+---
+
+# 24. Testing
+
+Critical business logic must have automated tests.
+
+Test:
+
+## Leave Balance
+
+* Full-year employee
+* Mid-year employee
+* Zero remaining balance
+
+## Leave Calculation
+
+* Weekdays
+* Weekends
+* Holidays
+* Holiday + weekend combinations
+
+## Conflict Detection
+
+* No conflict
+* Partial overlap
+* Multiple overlapping employees
+* Excessive absence
+
+## State Machine
+
+* Manager approval
+* HR approval
+* Manager rejection
+* HR rejection
+* Invalid transitions
+
+## Escalation
+
+* Within timeout
+* Beyond timeout
+* Already escalated request
+
+## Security
+
+* Employee permissions
+* Manager permissions
+* HR permissions
+* Unauthorized access
+
+---
+
+# 25. Seed Data
+
+Provide realistic development seed data.
+
+Example:
+
+```text
+HR:
+hr@demo.com
+
+Manager:
+manager@demo.com
+
+Employees:
+employee1@demo.com
+employee2@demo.com
+employee3@demo.com
+```
+
+Create:
+
+* Teams
+* Employees
+* Manager relationships
+* Leave policies
+* Leave balances
+* Holidays
+* Sample leave requests
+* Notifications
+
+Document demo credentials in the README.
+
+---
+
+# 26. Demo Workflows
+
+The following must work end-to-end.
+
+## Normal Approval
+
+```text
+Employee joins mid-year
+        ↓
+Pro-rated balance calculated
+        ↓
+Employee applies for leave
+        ↓
+Leave days calculated
+        ↓
+Balance validated
+        ↓
+Team conflict detected
+        ↓
+Manager sees warning
+        ↓
+Manager approves
+        ↓
+PENDING_HR
+        ↓
+HR approves
+        ↓
+APPROVED
+        ↓
+Balance updated
+        ↓
+Audit updated
+        ↓
+Employee notified
+```
+
+## Automatic Escalation
+
+```text
+Employee applies
+        ↓
+PENDING_MANAGER
+        ↓
+Manager does not respond
+        ↓
+Timeout
+        ↓
+Scheduler runs
+        ↓
+ESCALATED
+        ↓
+HR sees request
+        ↓
+HR receives notification
+```
+
+---
+
+# 27. Security Rules
+
+Never rely on the frontend for authorization.
+
+Backend must enforce:
+
+```text
+Employee
+→ Own resources
+
+Manager
+→ Team resources
+
+HR
+→ HR resources
+```
+
+Never allow:
+
+```text
+Employee → approve
+Employee → HR queue
+
+Manager → HR approval
+
+Unauthorized user → another employee's data
+```
+
+---
+
+# 28. Code Quality Rules
+
+Always:
+
+* Follow SOLID
+* Keep controllers thin
+* Keep services focused
+* Avoid duplicated logic
+* Use meaningful names
+* Validate external input
+* Use transactions
+* Centralize state transitions
+* Use DTOs
+* Handle exceptions consistently
+* Externalize configuration
+* Avoid hard-coded business rules
+
+Do not create giant service classes.
+
+Do not put database logic inside React.
+
+Do not put business rules inside controllers.
+
+---
+
+# 29. Environment Configuration
+
+Never commit secrets.
+
+Use environment/application configuration for:
+
+```text
+DATABASE_URL
+JWT_SECRET
+```
+
+and other environment-specific values.
+
+Provide an example environment file such as:
+
+```text
+.env.example
+```
+
+Never commit real credentials.
+
+---
+
+# 30. README Requirements
+
+Maintain a complete README containing:
+
+1. Project overview
+2. Architecture
+3. Technology stack
+4. Project structure
+5. Database setup
+6. Backend setup
+7. Frontend setup
+8. Environment variables
+9. API documentation
+10. Roles
+11. State machine
+12. Business rules
+13. Proration logic
+14. Conflict detection
+15. Escalation
+16. Notifications
+17. Demo credentials
+18. Running the project
+19. Running tests
+20. Demo workflow
+21. Troubleshooting
+
+Use Mermaid diagrams for:
+
+* Architecture
+* State machine
+
+---
+
+# 31. Implementation Order
+
+Implement in this order:
+
+```text
+Phase 1
+Project setup + database
+
+Phase 2
+Entities + repositories + DTOs
+
+Phase 3
+Authentication + authorization
+
+Phase 4
+Leave application + balance calculation
+
+Phase 5
+Approval state machine
+
+Phase 6
+Conflict detection
+
+Phase 7
+Automatic escalation
+
+Phase 8
+Notifications + audit history
+
+Phase 9
+React dashboards
+
+Phase 10
+Calendar + analytics
+
+Phase 11
+Testing
+
+Phase 12
+UI polish + documentation + demo verification
+```
+
+Do not skip foundational phases.
+
+---
+
+# 32. Verification After Every Phase
+
+After completing each phase:
+
+1. Compile the backend.
+2. Run relevant tests.
+3. Run frontend checks/build.
+4. Fix errors.
+5. Verify existing functionality.
+6. Only then continue.
+
+Never knowingly leave the repository in a broken state.
+
+---
+
+# 33. Git Safety
+
+Before major changes:
+
+* Inspect git status.
+* Avoid overwriting unrelated user work.
+* Do not delete files unless necessary.
+* Do not reset or force-push without explicit instruction.
+* Keep changes logically grouped.
+
+Do not modify unrelated parts of the project.
+
+---
+
+# 34. Important Don'ts
+
+DO NOT:
+
+* Add unnecessary microservices
+* Add AI/ML just for appearance
+* Automatically reject team-conflict leave
+* Automatically reject excessive team absence
+* Bypass the approval state machine
+* Hard-code policies
+* Expose JPA entities directly
+* Store plaintext passwords
+* Trust frontend authorization
+* Put business logic in controllers
+* Create fake APIs
+* Create fake buttons
+* Leave core features as TODOs
+* Ignore failing tests
+* Ignore compilation errors
+
+---
+
+# 35. Working Style
+
+When starting work:
+
+### Step 1
+
+Inspect the repository.
+
+### Step 2
+
+Understand what already exists.
+
+### Step 3
+
+Identify the current implementation phase.
+
+### Step 4
+
+Implement the next logical phase.
+
+### Step 5
+
+Run tests/build checks.
+
+### Step 6
+
+Fix all issues.
+
+### Step 7
+
+Continue to the next phase.
+
+When making significant changes, briefly explain:
+
+```text
+What I found
+What I am changing
+Why I am changing it
+How I verified it
+```
+
+Do not repeatedly ask for confirmation unless there is a genuine blocker.
+
+---
+
+# 36. Definition of Done
+
+The project is complete only when:
+
+### Backend
+
+* Builds successfully
+* Starts successfully
+* Connects to PostgreSQL
+* Authentication works
+* Authorization works
+* APIs work
+* Leave calculations work
+* Pro-rating works
+* Conflict detection works
+* State machine works
+* Escalation works
+* Notifications work
+* Audit history works
+* Tests pass
+
+### Frontend
+
+* Builds successfully
+* Login works
+* Employee dashboard works
+* Manager dashboard works
+* HR dashboard works
+* Leave application works
+* Approval workflow works
+* Notifications work
+* Calendar works
+* Analytics works
+* Responsive UI works
+
+### End-to-End
+
+These workflows must work:
+
+```text
+Employee
+   ↓
+Manager
+   ↓
+HR
+   ↓
+Approved
+```
+
+and:
+
+```text
+Employee
+   ↓
+Manager timeout
+   ↓
+Escalated
+   ↓
+HR
+```
+
+and:
+
+```text
+Mid-year employee
+   ↓
+Pro-rated entitlement
+```
+
+and:
+
+```text
+Leave request
+   ↓
+Team conflict
+   ↓
+Manager warning
+   ↓
+Manager decision
+```
+
+---
+
+# FINAL INSTRUCTION
+
+**Do not stop at analysis. Build the actual application.**
+
+Start by inspecting the repository and determine what has already been implemented.
+
+Then implement the system incrementally according to this document.
+
+Always prioritize:
+
+```text
+CORRECTNESS
+    >
+SECURITY
+    >
+BUSINESS LOGIC
+    >
+TESTABILITY
+    >
+MAINTAINABILITY
+    >
+UI POLISH
+```
+
+The final result must be a complete, runnable, tested Leave Management System suitable for a live technical demonstration.
